@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "IntentGate - 認知フリクション",
+  "short_name": "IntentGate",
+  "description": "スマホの無意識なロック解除やだらだら利用を防ぐ認知フリクションアプリ",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F8FAFC",
+  "theme_color": "#FFFFFF",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
