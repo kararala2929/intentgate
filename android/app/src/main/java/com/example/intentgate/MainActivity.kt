@@ -28,6 +28,22 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val REQUEST_CODE_OVERLAY = 2001
         const val APP_URL = "https://intentgate-ten.vercel.app/"
+        const val PREFS_NAME = "intentgate_prefs"
+        const val PREF_KEY_ENABLED = "gate_enabled"
+
+        /** アプリが有効かどうかを SharedPreferences から取得（デフォルト: 有効） */
+        fun isGateEnabled(context: Context): Boolean {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREF_KEY_ENABLED, true)
+        }
+
+        /** アプリの有効/無効を SharedPreferences に保存 */
+        fun setGateEnabled(context: Context, enabled: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_KEY_ENABLED, enabled)
+                .apply()
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -184,6 +200,17 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun isNativeApp(): Boolean {
             return true
+        }
+
+        @JavascriptInterface
+        fun isGateEnabled(): Boolean {
+            return isGateEnabled(this@MainActivity)
+        }
+
+        @JavascriptInterface
+        fun setGateEnabled(enabled: Boolean) {
+            android.util.Log.i("IntentGate", "AndroidBridge.setGateEnabled: $enabled")
+            setGateEnabled(this@MainActivity, enabled)
         }
 
         @JavascriptInterface

@@ -80,14 +80,39 @@ export default function App() {
     }
   };
 
-  // Persist settings
+  // Persist settings & sync to native AndroidBridge
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
     } catch {
       // ignore storage errors
     }
+
+    // Android Native側のオン/オフ設定を同期
+    try {
+      const bridge = (window as any).AndroidBridge ?? (window as any).Android;
+      if (bridge?.setGateEnabled) {
+        bridge.setGateEnabled(settings.isGateEnabled);
+      }
+    } catch (e) {
+      console.warn('[IntentGate] sync setGateEnabled failed:', e);
+    }
   }, [settings]);
+
+  // 初回ロード時にネイティブ側の状態を反映（ネイティブアプリ内で動いている場合）
+  useEffect(() => {
+    try {
+      const bridge = (window as any).AndroidBridge ?? (window as any).Android;
+      if (bridge?.isGateEnabled) {
+        const nativeEnabled = bridge.isGateEnabled();
+        if (typeof nativeEnabled === 'boolean') {
+          setSettings((prev) => ({ ...prev, isGateEnabled: nativeEnabled }));
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
 
   // Regenerate problem when settings change
   useEffect(() => {

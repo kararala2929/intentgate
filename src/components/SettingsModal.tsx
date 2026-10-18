@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { X } from 'lucide-react';
+import { Power, ShieldAlert, ShieldCheck, X } from 'lucide-react';
 import { ALL_CATEGORIES } from '../config/constants';
 import { TRANSLATIONS } from '../i18n/translations';
 import { AppSettings, ChallengeCategory, DifficultyLevel, Language } from '../types';
@@ -30,6 +30,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const tDiffs = TRANSLATIONS[language].difficulties;
   const tCats = TRANSLATIONS[language].categories;
 
+  const toggleGateEnabled = () => {
+    onUpdateSettings({ ...settings, isGateEnabled: !settings.isGateEnabled });
+  };
+
   const toggleCategory = (cat: ChallengeCategory) => {
     const exists = settings.enabledCategories.includes(cat);
     if (exists && settings.enabledCategories.length === 1) return;
@@ -51,6 +55,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* ロック解除時の自動起動 ON/OFF スイッチ */}
+        <div className="p-4 rounded-2xl border transition-all duration-200 bg-slate-50/80 border-slate-200">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+                  settings.isGateEnabled
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-rose-100 text-rose-600'
+                }`}
+              >
+                {settings.isGateEnabled ? (
+                  <ShieldCheck className="w-5 h-5" />
+                ) : (
+                  <ShieldAlert className="w-5 h-5" />
+                )}
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-900">
+                  {settings.isGateEnabled ? t.gateEnabledLabel : t.gateDisabledLabel}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {settings.isGateEnabled ? t.gateEnabledDesc : t.gateDisabledDesc}
+                </p>
+              </div>
+            </div>
+
+            {/* トグルスイッチ本体 */}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.isGateEnabled}
+              onClick={toggleGateEnabled}
+              className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                settings.isGateEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                  settings.isGateEnabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         {/* 難易度（3段階） */}

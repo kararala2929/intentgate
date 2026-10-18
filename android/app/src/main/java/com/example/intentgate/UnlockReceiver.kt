@@ -28,6 +28,12 @@ class UnlockReceiver : BroadcastReceiver() {
             }
             lastLaunchTime = now
 
+            // アプリ起動がオフに設定されている場合は何もしない
+            if (!MainActivity.isGateEnabled(context)) {
+                Log.i(TAG, "Gate is disabled by user setting. Skip launching MainActivity.")
+                return
+            }
+
             // Android 10以降のバックグラウンド起動制限（重ねて表示権限）チェック
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
                 Log.w(TAG, "SYSTEM_ALERT_WINDOW permission not granted. Cannot launch activity from background.")

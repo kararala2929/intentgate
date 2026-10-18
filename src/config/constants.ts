@@ -39,6 +39,7 @@ export const ALL_CATEGORIES: ChallengeCategory[] = [
  * アプリの初期設定値（全8ジャンル有効）
  */
 export const DEFAULT_APP_SETTINGS: AppSettings = {
+  isGateEnabled: true,
   enabledCategories: ALL_CATEGORIES,
   difficulty: 'normal',
   requiredStreak: 1,

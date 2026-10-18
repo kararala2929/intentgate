@@ -54,6 +54,7 @@ export interface ChallengeItem {
 }
 
 export interface AppSettings {
+  isGateEnabled: boolean; // ロック解除時の自動起動オン/オフ
   enabledCategories: ChallengeCategory[];
   difficulty: DifficultyLevel;
   requiredStreak: number; // 解錠に必要な正解数（1〜3問）
