@@ -1,53 +1,76 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 必要な権限 -->
+    <!-- 1. インターネット通信権限（Web画面を表示するために必須） -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- 2. 他のアプリの上に重ねて表示する権限（Android 10+でロック解除時に自動割り込みするために必須） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- 3. ロック解除監視フォアグラウンドサービス権限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- 4. スマホ再起動時に自動で監視サービスを復旧させる権限 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- 5. 画面点灯・全画面インテント起動用権限 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="IntentGate"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.IntentGate">
+        android:theme="@style/Theme.AppCompat.NoActionBar"
+        android:usesCleartextTraffic="true">
 
-        <!-- 最初の起動設定画面 -->
+        <!-- メイン画面（ロック画面の上でも最前面で起動・単一インスタンス管理） -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- ロック解除時に全画面で立ち上がる画面 -->
-        <activity
-            android:name=".LockActivity"
-            android:exported="false"
-            android:showOnLockScreen="true"
-            android:screenOrientation="portrait" />
-
-        <!-- ロック監視常駐サービス -->
+        <!-- ロック解除・画面点灯を常駐検知するフォアグラウンドサービス -->
         <service
             android:name=".UnlockService"
-            android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse"
+            tools:ignore="ForegroundServicePermission">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="IntentGate Screen Lock Monitoring Service" />
+        </service>
 
-        <!-- ロック解除受信機 -->
+        <!-- スマホ再起動時に監視サービスを自動再開するレシーバー -->
         <receiver
-            android:name=".UnlockReceiver"
-            android:enabled="true"
-            android:exported="false">
+            android:name=".BootReceiver"
+            android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.USER_PRESENT" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
+        <!-- 画面点灯・ロック解除イベント受取レシーバー（動的登録） -->
+        <receiver
+            android:name=".UnlockReceiver"
+            android:exported="false" />
+
     </application>
+
 </manifest>
