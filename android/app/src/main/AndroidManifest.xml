@@ -16,9 +16,10 @@
     <!-- 4. スマホ再起動時に自動で監視サービスを復旧させる権限 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- 5. 画面点灯・全画面インテント起動用権限 -->
+    <!-- 5. 画面点灯・全画面インテント起動用権限・通知権限 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
