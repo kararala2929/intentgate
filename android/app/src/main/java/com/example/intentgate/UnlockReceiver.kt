@@ -21,7 +21,7 @@ class UnlockReceiver : BroadcastReceiver() {
         val action = intent.action
         Log.d(TAG, "Broadcast received: $action")
 
-        if (action == Intent.ACTION_USER_PRESENT || action == Intent.ACTION_SCREEN_ON) {
+        if (action == Intent.ACTION_USER_PRESENT) {
             val now = System.currentTimeMillis()
             if (now - lastLaunchTime < 1500) {
                 return

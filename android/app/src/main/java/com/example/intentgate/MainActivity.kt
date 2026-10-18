@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val REQUEST_CODE_OVERLAY = 2001
-        const val APP_URL = "https://ais-dev-jzzwy2zb75ntoxkxzifqf7-569377906061.asia-east1.run.app"
+        const val APP_URL = "https://intentgate-ten.vercel.app/"
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -57,6 +57,16 @@ class MainActivity : ComponentActivity() {
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                     return false
+                }
+
+                override fun onReceivedError(
+                    view: WebView?,
+                    errorCode: Int,
+                    description: String?,
+                    failingUrl: String?
+                ) {
+                    super.onReceivedError(view, errorCode, description, failingUrl)
+                    android.util.Log.e("IntentGate", "WebView error: $errorCode $description @ $failingUrl")
                 }
             }
 
@@ -144,31 +154,31 @@ class MainActivity : ComponentActivity() {
     }
 
     inner class AndroidBridge {
+
+        private fun dismissApp() {
+            android.util.Log.i("IntentGate", "AndroidBridge: dismissApp called")
+            moveTaskToBack(true)
+            finishAndRemoveTask()
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
+        }
+
         @JavascriptInterface
         fun unlockAndDismiss() {
-            runOnUiThread {
-                finishAndRemoveTask()
-                @Suppress("DEPRECATION")
-                overridePendingTransition(0, 0)
-            }
+            android.util.Log.i("IntentGate", "AndroidBridge.unlockAndDismiss() called")
+            runOnUiThread { dismissApp() }
         }
 
         @JavascriptInterface
         fun closeApp() {
-            runOnUiThread {
-                finishAndRemoveTask()
-                @Suppress("DEPRECATION")
-                overridePendingTransition(0, 0)
-            }
+            android.util.Log.i("IntentGate", "AndroidBridge.closeApp() called")
+            runOnUiThread { dismissApp() }
         }
 
         @JavascriptInterface
         fun finish() {
-            runOnUiThread {
-                finishAndRemoveTask()
-                @Suppress("DEPRECATION")
-                overridePendingTransition(0, 0)
-            }
+            android.util.Log.i("IntentGate", "AndroidBridge.finish() called")
+            runOnUiThread { dismissApp() }
         }
 
         @JavascriptInterface
@@ -178,7 +188,8 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun onUnlockSuccess(purpose: String?, count: Int) {
-            // Android側ログ用
+            android.util.Log.i("IntentGate", "AndroidBridge.onUnlockSuccess() purpose=$purpose count=$count")
+            runOnUiThread { dismissApp() }
         }
     }
 
