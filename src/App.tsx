@@ -4,9 +4,8 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, Settings, Smartphone } from 'lucide-react';
+import { BarChart3, Settings } from 'lucide-react';
 import { ChallengeStep } from './components/ChallengeStep';
-import { MobileGuideModal } from './components/MobileGuideModal';
 import { PurposeStep } from './components/PurposeStep';
 import { SettingsModal } from './components/SettingsModal';
 import { StatsModal } from './components/StatsModal';
@@ -61,7 +60,6 @@ export default function App() {
   const [selectedPurposeId, setSelectedPurposeId] = useState<PurposeId>('contact');
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isStatsOpen, setIsStatsOpen] = useState<boolean>(false);
-  const [isMobileGuideOpen, setIsMobileGuideOpen] = useState<boolean>(false);
 
   // Challenge state
   const [currentChallenge, setCurrentChallenge] = useState<ChallengeItem>(() =>
@@ -243,17 +241,6 @@ export default function App() {
         </span>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* スマホで開く（QRコード案内）ボタン */}
-          <button
-            type="button"
-            onClick={() => setIsMobileGuideOpen(true)}
-            className="min-h-[36px] px-2 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center gap-1 transition-colors"
-            title={language === 'ja' ? 'スマホで使う（QR表示）' : 'Open on Mobile (QR)'}
-          >
-            <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
-            <span className="hidden xs:inline">{language === 'ja' ? 'スマホ' : 'Mobile'}</span>
-          </button>
-
           {/* 日 / 英 言語切り替えトグルボタン */}
           <div
             className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200/80"
@@ -361,12 +348,6 @@ export default function App() {
         settings={settings}
         onUpdateSettings={setSettings}
         onClose={() => setIsSettingsOpen(false)}
-      />
-      {/* スマホ連携・QRコード案内モーダル */}
-      <MobileGuideModal
-        isOpen={isMobileGuideOpen}
-        language={language}
-        onClose={() => setIsMobileGuideOpen(false)}
       />
     </div>
   );
