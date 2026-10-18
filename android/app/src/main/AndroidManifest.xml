@@ -26,7 +26,7 @@
         android:label="IntentGate"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.NoActionBar"
+        android:theme="@style/Theme.IntentGate"
         android:usesCleartextTraffic="true">
 
         <!-- メイン画面（ロック画面の上でも最前面で起動・単一インスタンス管理） -->
