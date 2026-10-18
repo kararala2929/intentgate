@@ -172,7 +172,7 @@ export default function App() {
     selectedPurposeId,
   ]);
 
-  // 間違えた時の5秒間ペナルティカウントダウン → 0秒になったら自動的に次の問題へ切り替える
+  // 間違えた時の2秒間ペナルティカウントダウン → 0秒になったら自動的に次の問題へ切り替える
   useEffect(() => {
     if (feedbackState !== 'wrong') return;
     if (penaltySeconds <= 0) {
@@ -238,7 +238,7 @@ export default function App() {
       setFeedbackState('correct');
     } else {
       setFeedbackState('wrong');
-      setPenaltySeconds(5);
+      setPenaltySeconds(2);
     }
   };
 
@@ -249,7 +249,7 @@ export default function App() {
       setFeedbackState('correct');
     } else {
       setFeedbackState('wrong');
-      setPenaltySeconds(5);
+      setPenaltySeconds(2);
     }
   };
 

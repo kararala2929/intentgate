@@ -58,7 +58,7 @@ export const TRANSLATIONS = {
       numpadConfirm: '決定',
       correctUnlocking: '正解！自動でロックを解除します...',
       correctNext: '正解！自動で次の問題へ移ります...',
-      wrongPenalty: '不正解！5秒後に自動で次の問題へ切り替わります',
+      wrongPenalty: '不正解！2秒後に自動で次の問題へ切り替わります',
       penaltyRemaining: 'あと {sec}秒',
     },
     unlockedStep: {
@@ -145,7 +145,7 @@ export const TRANSLATIONS = {
       numpadConfirm: 'Submit',
       correctUnlocking: 'Correct! Unlocking device...',
       correctNext: 'Correct! Next challenge...',
-      wrongPenalty: 'Incorrect! Next challenge in 5 seconds',
+      wrongPenalty: 'Incorrect! Next challenge in 2 seconds',
       penaltyRemaining: '{sec}s remaining',
     },
     unlockedStep: {
