@@ -118,6 +118,17 @@ export default function App() {
         const updated = recordUnlockLog(selectedPurposeId, settings.difficulty);
         setUnlockLogs(updated);
         setStep('unlocked');
+
+        // ── Androidアプリに「閉じて」と通知 ──
+        try {
+          const bridge = (window as any).AndroidBridge ?? (window as any).Android;
+          if (bridge?.unlockAndDismiss) {
+            bridge.unlockAndDismiss();
+          }
+        } catch (e) {
+          console.warn('[IntentGate] AndroidBridge call failed:', e);
+        }
+
         return;
       }
       setStreak(nextStreak);
