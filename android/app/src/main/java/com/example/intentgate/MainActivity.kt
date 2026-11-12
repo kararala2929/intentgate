@@ -25,6 +25,9 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
 
+    /** クイズを正解・解錠完了したかどうかのフラグ（完了するまでアプリ終了・離脱を防止） */
+    private var isQuizCompleted: Boolean = false
+
     companion object {
         private const val REQUEST_CODE_OVERLAY = 2001
         const val APP_URL = "https://intentgate-ten.vercel.app/"
@@ -59,7 +62,10 @@ class MainActivity : ComponentActivity() {
         // 3. ロック解除検知用の常駐サービスを開始
         UnlockService.start(this)
 
-        // 4. WebView の生成と設定
+        // 4. ナビゲーションバー（四角ボタン等）を隠す没入モードを設定
+        hideSystemUI()
+
+        // 5. WebView の生成と設定
         webView = WebView(this).apply {
             settings.apply {
                 javaScriptEnabled = true
@@ -93,13 +99,18 @@ class MainActivity : ComponentActivity() {
 
         setContentView(webView)
 
-        // 5. 最新の「戻る操作（ジェスチャー / 戻るボタン）」ハンドラを登録
+        // 6. 「戻る操作（ジェスチャー / 戻るボタン）」ハンドラを登録（解錠完了まで脱出をブロック）
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (::webView.isInitialized && webView.canGoBack()) {
-                    webView.goBack()
+                if (isQuizCompleted) {
+                    if (::webView.isInitialized && webView.canGoBack()) {
+                        webView.goBack()
+                    } else {
+                        finish()
+                    }
                 } else {
-                    finish()
+                    // クイズ未完了時は戻る操作による終了を無効化
+                    Toast.makeText(this@MainActivity, "問題を解くまで中断できません", Toast.LENGTH_SHORT).show()
                 }
             }
         })
@@ -112,10 +123,72 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
 
+        // 再度ロック解除等で呼び出された際はクイズ未完了状態に戻し、没入モードを再適用
+        isQuizCompleted = false
+        hideSystemUI()
+
         if (::webView.isInitialized) {
             webView.evaluateJavascript(
                 "try { window.dispatchEvent(new Event('visibilitychange')); } catch(e) {}",
                 null
+            )
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideSystemUI()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            hideSystemUI()
+        }
+    }
+
+    /**
+     * ユーザーが四角ボタン（履歴/タスクボタン）やホームボタンを押して離脱しようとした時の検知。
+     * クイズ未完了時は即座に Activity を最前面に再起動して引き戻す。
+     */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (!isQuizCompleted) {
+            try {
+                val bringToFrontIntent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+                startActivity(bringToFrontIntent)
+            } catch (e: Exception) {
+                android.util.Log.e("IntentGate", "Failed to bring activity to front", e)
+            }
+        }
+    }
+
+    /**
+     * 没入モード（Immersive Sticky Mode）を適用し、ナビゲーションバー（四角ボタン・ホームボタン等）や
+     * ステータスバーを非表示にして誤操作・離脱を防ぐ
+     */
+    private fun hideSystemUI() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { controller ->
+                controller.hide(
+                    android.view.WindowInsets.Type.statusBars() or
+                    android.view.WindowInsets.Type.navigationBars()
+                )
+                controller.systemBarsBehavior =
+                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (
+                android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
             )
         }
     }
@@ -173,6 +246,7 @@ class MainActivity : ComponentActivity() {
 
         private fun dismissApp() {
             android.util.Log.i("IntentGate", "AndroidBridge: dismissApp called")
+            isQuizCompleted = true
             moveTaskToBack(true)
             finishAndRemoveTask()
             @Suppress("DEPRECATION")
