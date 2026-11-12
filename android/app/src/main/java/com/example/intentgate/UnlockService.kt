@@ -11,6 +11,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
+import android.util.Log
 
 /**
  * IntentGate - ロック解除・画面点灯監視フォアグラウンドサービス
@@ -46,6 +48,35 @@ class UnlockService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /**
+     * ユーザーがタスク一覧からアプリをスワイプで終了、または「全て閉じる」を押した場合のコールバック。
+     * クイズが進行中（未完了）の場合は、即座に MainActivity を再起動して脱出を防ぐ。
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d("IntentGateService", "onTaskRemoved called, isQuizInProgress=${MainActivity.isQuizInProgress}")
+
+        if (MainActivity.isQuizInProgress && MainActivity.isGateEnabled(this)) {
+            // 重ねて表示の権限チェック（Android 6.0+）
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                Log.w("IntentGateService", "Cannot relaunch: SYSTEM_ALERT_WINDOW not granted")
+                return
+            }
+
+            try {
+                val relaunchIntent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+                startActivity(relaunchIntent)
+                Log.i("IntentGateService", "MainActivity relaunched after task removal")
+            } catch (e: Exception) {
+                Log.e("IntentGateService", "Failed to relaunch MainActivity", e)
+            }
+        }
+    }
 
     private fun registerUnlockReceiver() {
         if (!isReceiverRegistered) {

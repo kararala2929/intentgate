@@ -42,8 +42,12 @@ class MainActivity : ComponentActivity() {
         const val PREFS_NAME = "intentgate_prefs"
         const val PREF_KEY_ENABLED = "gate_enabled"
 
+        /** クイズが進行中（未解錠）かどうかを示すグローバルフラグ */
+        @Volatile
+        var isQuizInProgress: Boolean = true
+
         /** onUserLeaveHint のデバウンス間隔（ミリ秒） */
-        private const val LEAVE_HINT_DEBOUNCE_MS = 1000L
+        private const val LEAVE_HINT_DEBOUNCE_MS = 600L
 
         /** アプリが有効かどうかを SharedPreferences から取得（デフォルト: 有効） */
         fun isGateEnabled(context: Context): Boolean {
@@ -63,6 +67,8 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        isQuizInProgress = true
+        isQuizCompleted = false
 
         // 1. ロック画面・スリープ画面の上からでも画面を表示可能にする設定
         setupLockscreenDisplay()
@@ -136,6 +142,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
 
         // 再度ロック解除等で呼び出された際はクイズ未完了状態に戻す
+        isQuizInProgress = true
         isQuizCompleted = false
 
         if (::webView.isInitialized) {
@@ -159,32 +166,50 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * ユーザーが四角ボタン（履歴/タスクボタン）やホームボタンを押して離脱しようとした時の検知。
-     * クイズ未完了時は少し遅延を入れてから Activity を最前面に引き戻す。
-     * デバウンスにより連続発火・無限ループを防止する。
+     * ユーザーが三本線ボタン（タスク履歴 / Recents）や四角ボタン、ホームボタンを押して離脱しようとした時の検知。
      */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (!isQuizCompleted) {
+        relaunchSelf("onUserLeaveHint")
+    }
+
+    /**
+     * アプリが非表示になった（タスク一覧画面やホーム画面に切り替わった）ときの検知。
+     * クイズ未完了の場合は即座に最前面に引き戻す。
+     */
+    override fun onStop() {
+        super.onStop()
+        if (isQuizInProgress && !isQuizCompleted) {
+            relaunchSelf("onStop")
+        }
+    }
+
+    /**
+     * クイズ未完了時の画面引き戻し共通ロジック
+     */
+    private fun relaunchSelf(triggerSource: String) {
+        if (!isQuizCompleted && isQuizInProgress) {
             val now = System.currentTimeMillis()
             if (now - lastLeaveHintTime < LEAVE_HINT_DEBOUNCE_MS) {
-                return // デバウンス：短時間の連続発火を無視
+                return // デバウンス：短時間の連続発火を防止
             }
             lastLeaveHintTime = now
+            android.util.Log.d("IntentGate", "relaunchSelf triggered by $triggerSource")
 
-            // 少し遅延を入れてから引き戻す（即座に呼ぶとライフサイクル競合でクラッシュする場合がある）
             handler.postDelayed({
-                try {
-                    val bringToFrontIntent = Intent(this, MainActivity::class.java).apply {
-                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                Intent.FLAG_ACTIVITY_NEW_TASK
+                if (!isQuizCompleted && isQuizInProgress) {
+                    try {
+                        val bringToFrontIntent = Intent(this, MainActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                    Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(bringToFrontIntent)
+                    } catch (e: Exception) {
+                        android.util.Log.e("IntentGate", "Failed to bring activity to front", e)
                     }
-                    startActivity(bringToFrontIntent)
-                } catch (e: Exception) {
-                    android.util.Log.e("IntentGate", "Failed to bring activity to front", e)
                 }
-            }, 300L)
+            }, 250L)
         }
     }
 
@@ -247,6 +272,7 @@ class MainActivity : ComponentActivity() {
                     .setPositiveButton("設定画面を開く") { _, _ ->
                         // 設定画面への遷移中は離脱防止を一時解除
                         isQuizCompleted = true
+                        isQuizInProgress = false
                         val intent = Intent(
                             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                             Uri.parse("package:$packageName")
@@ -267,6 +293,7 @@ class MainActivity : ComponentActivity() {
         if (requestCode == REQUEST_CODE_OVERLAY) {
             // 設定画面から戻ってきたらクイズ未完了状態に戻す
             isQuizCompleted = false
+            isQuizInProgress = true
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
                 Toast.makeText(this, "権限が許可されました。ロック解除時の自動起動が有効です。", Toast.LENGTH_SHORT).show()
                 UnlockService.start(this)
@@ -281,6 +308,7 @@ class MainActivity : ComponentActivity() {
         private fun dismissApp() {
             android.util.Log.i("IntentGate", "AndroidBridge: dismissApp called")
             isQuizCompleted = true
+            isQuizInProgress = false
             moveTaskToBack(true)
             finishAndRemoveTask()
             @Suppress("DEPRECATION")

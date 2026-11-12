@@ -30,11 +30,12 @@
         android:theme="@style/Theme.IntentGate"
         android:usesCleartextTraffic="true">
 
-        <!-- メイン画面（ロック画面の上でも最前面で起動・単一インスタンス管理） -->
+        <!-- メイン画面（ロック画面の上でも最前面で起動・単一インスタンス管理・タスク一覧に非表示） -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:excludeFromRecents="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
