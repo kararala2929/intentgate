@@ -8,6 +8,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
@@ -28,11 +30,20 @@ class MainActivity : ComponentActivity() {
     /** クイズを正解・解錠完了したかどうかのフラグ（完了するまでアプリ終了・離脱を防止） */
     private var isQuizCompleted: Boolean = false
 
+    /** onUserLeaveHint の連続発火を防ぐデバウンス用タイムスタンプ */
+    private var lastLeaveHintTime: Long = 0L
+
+    /** UI スレッド用ハンドラ（遅延実行用） */
+    private val handler = Handler(Looper.getMainLooper())
+
     companion object {
         private const val REQUEST_CODE_OVERLAY = 2001
         const val APP_URL = "https://intentgate-ten.vercel.app/"
         const val PREFS_NAME = "intentgate_prefs"
         const val PREF_KEY_ENABLED = "gate_enabled"
+
+        /** onUserLeaveHint のデバウンス間隔（ミリ秒） */
+        private const val LEAVE_HINT_DEBOUNCE_MS = 1000L
 
         /** アプリが有効かどうかを SharedPreferences から取得（デフォルト: 有効） */
         fun isGateEnabled(context: Context): Boolean {
@@ -62,14 +73,12 @@ class MainActivity : ComponentActivity() {
         // 3. ロック解除検知用の常駐サービスを開始
         UnlockService.start(this)
 
-        // 4. ナビゲーションバー（四角ボタン等）を隠す没入モードを設定
-        hideSystemUI()
-
-        // 5. WebView の生成と設定
+        // 4. WebView の生成と設定
         webView = WebView(this).apply {
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
+                @Suppress("DEPRECATION")
                 databaseEnabled = true
                 cacheMode = WebSettings.LOAD_DEFAULT
                 useWideViewPort = true
@@ -99,6 +108,9 @@ class MainActivity : ComponentActivity() {
 
         setContentView(webView)
 
+        // 5. ナビゲーションバー（四角ボタン等）を隠す没入モード（setContentView の後に実行）
+        hideSystemUI()
+
         // 6. 「戻る操作（ジェスチャー / 戻るボタン）」ハンドラを登録（解錠完了まで脱出をブロック）
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -123,9 +135,8 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
 
-        // 再度ロック解除等で呼び出された際はクイズ未完了状態に戻し、没入モードを再適用
+        // 再度ロック解除等で呼び出された際はクイズ未完了状態に戻す
         isQuizCompleted = false
-        hideSystemUI()
 
         if (::webView.isInitialized) {
             webView.evaluateJavascript(
@@ -149,47 +160,65 @@ class MainActivity : ComponentActivity() {
 
     /**
      * ユーザーが四角ボタン（履歴/タスクボタン）やホームボタンを押して離脱しようとした時の検知。
-     * クイズ未完了時は即座に Activity を最前面に再起動して引き戻す。
+     * クイズ未完了時は少し遅延を入れてから Activity を最前面に引き戻す。
+     * デバウンスにより連続発火・無限ループを防止する。
      */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (!isQuizCompleted) {
-            try {
-                val bringToFrontIntent = Intent(this, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                }
-                startActivity(bringToFrontIntent)
-            } catch (e: Exception) {
-                android.util.Log.e("IntentGate", "Failed to bring activity to front", e)
+            val now = System.currentTimeMillis()
+            if (now - lastLeaveHintTime < LEAVE_HINT_DEBOUNCE_MS) {
+                return // デバウンス：短時間の連続発火を無視
             }
+            lastLeaveHintTime = now
+
+            // 少し遅延を入れてから引き戻す（即座に呼ぶとライフサイクル競合でクラッシュする場合がある）
+            handler.postDelayed({
+                try {
+                    val bringToFrontIntent = Intent(this, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(bringToFrontIntent)
+                } catch (e: Exception) {
+                    android.util.Log.e("IntentGate", "Failed to bring activity to front", e)
+                }
+            }, 300L)
         }
     }
 
     /**
      * 没入モード（Immersive Sticky Mode）を適用し、ナビゲーションバー（四角ボタン・ホームボタン等）や
-     * ステータスバーを非表示にして誤操作・離脱を防ぐ
+     * ステータスバーを非表示にして誤操作・離脱を防ぐ。
+     * try-catch で安全に囲み、万一失敗してもアプリ全体がクラッシュしないようにする。
      */
     private fun hideSystemUI() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let { controller ->
-                controller.hide(
-                    android.view.WindowInsets.Type.statusBars() or
-                    android.view.WindowInsets.Type.navigationBars()
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                @Suppress("DEPRECATION")
+                window.setDecorFitsSystemWindows(false)
+                window.insetsController?.let { controller ->
+                    controller.hide(
+                        android.view.WindowInsets.Type.statusBars() or
+                        android.view.WindowInsets.Type.navigationBars()
+                    )
+                    controller.systemBarsBehavior =
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
                 )
-                controller.systemBarsBehavior =
-                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = (
-                android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
-            )
+        } catch (e: Exception) {
+            android.util.Log.e("IntentGate", "hideSystemUI failed", e)
         }
     }
 
@@ -216,10 +245,13 @@ class MainActivity : ComponentActivity() {
                     .setTitle("権限の許可が必要です")
                     .setMessage("スマホのロックを解除した際に自動でIntentGateを画面前面に起動するため、「他のアプリの上に重ねて表示」を許可してください。")
                     .setPositiveButton("設定画面を開く") { _, _ ->
+                        // 設定画面への遷移中は離脱防止を一時解除
+                        isQuizCompleted = true
                         val intent = Intent(
                             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                             Uri.parse("package:$packageName")
                         )
+                        @Suppress("DEPRECATION")
                         startActivityForResult(intent, REQUEST_CODE_OVERLAY)
                     }
                     .setNegativeButton("あとで", null)
@@ -233,6 +265,8 @@ class MainActivity : ComponentActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_CODE_OVERLAY) {
+            // 設定画面から戻ってきたらクイズ未完了状態に戻す
+            isQuizCompleted = false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
                 Toast.makeText(this, "権限が許可されました。ロック解除時の自動起動が有効です。", Toast.LENGTH_SHORT).show()
                 UnlockService.start(this)
@@ -295,6 +329,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
         if (::webView.isInitialized) {
             webView.destroy()
         }
