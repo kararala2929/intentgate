@@ -1,0 +1,6 @@
+{
+  "name": "IntentGate - スマホ使いすぎ防止＆認知フリクション設計プロトタイプ",
+  "description": "スマホ起動・ロック解除時に「利用目的の確認」と「計算・英単語・論理パズル課題」を挟むことで、無意識なスマホ利用（だらだら見）を防ぐデジタルウェルビーイングアプリの体験プロトタイプ＆仕様壁打ち環境。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- シャックル -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M44,49V41a10,10 0 0,1 20,0v8"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="5" />
+    <!-- ボディ -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M41,48h26a7,7 0 0,1 7,7v15a7,7 0 0,1 -7,7h-26a7,7 0 0,1 -7,-7v-15a7,7 0 0,1 7,-7z" />
+</vector>
