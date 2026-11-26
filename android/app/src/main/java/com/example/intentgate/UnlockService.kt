@@ -230,6 +230,29 @@ class UnlockService : Service() {
             .build()
     }
 
+    /**
+     * タスク一覧（三本線 / Recents）からスワイプキルされた場合に
+     * クイズ未完了であれば自動的にMainActivityを再起動して引き戻す
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (MainActivity.isQuizInProgress && MainActivity.isGateEnabled(this)) {
+            Log.i(TAG, "Task removed while quiz in progress – relaunching MainActivity")
+            try {
+                val relaunch = Intent(this, MainActivity::class.java).apply {
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    )
+                }
+                startActivity(relaunch)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to relaunch after task removed", e)
+            }
+        }
+    }
+
     override fun onDestroy() {
         monitorHandler.removeCallbacks(monitorRunnable)
         if (isReceiverRegistered) {

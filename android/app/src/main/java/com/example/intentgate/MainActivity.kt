@@ -14,6 +14,8 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.provider.Settings
 import android.util.Base64
@@ -38,6 +40,18 @@ class MainActivity : ComponentActivity() {
     private var pendingTargetPackage: String? = null
     private var pendingTargetAppName: String? = null
 
+    /** クイズを正解・解錠完了したかどうかのフラグ（完了するまでアプリ終了・離脱を防止） */
+    private var isQuizCompleted: Boolean = false
+
+    /** onUserLeaveHint の連続発火を防ぐデバウンス用タイムスタンプ */
+    private var lastLeaveHintTime: Long = 0L
+
+    /** 権限設定画面へ遷移中は離脱防止を一時解除するフラグ */
+    private var isNavigatingToSettings: Boolean = false
+
+    /** UI スレッド用ハンドラ（遅延実行用） */
+    private val handler = Handler(Looper.getMainLooper())
+
     companion object {
         private const val REQUEST_CODE_OVERLAY = 2001
         const val APP_URL = "https://intentgate-ten.vercel.app/"
@@ -48,12 +62,19 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_TARGET_PACKAGE = "TARGET_PACKAGE"
         const val EXTRA_TARGET_APP_NAME = "TARGET_APP_NAME"
 
+        /** onUserLeaveHint のデバウンス間隔（ミリ秒） */
+        private const val LEAVE_HINT_DEBOUNCE_MS = 600L
+
         private val DEFAULT_RESTRICTED = setOf(
             "com.google.android.youtube",
             "com.twitter.android",
             "com.instagram.android",
             "com.zhiliaoapp.musically"
         )
+
+        /** クイズが進行中（未解錠）かどうかを示すグローバルフラグ（UnlockService から参照） */
+        @Volatile
+        var isQuizInProgress: Boolean = false
 
         /** クイズクリア済みのアプリをセッション中再割り込みしないための追跡変数 */
         @Volatile
@@ -124,6 +145,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 割り込み起動時はクイズ進行中フラグを立てる
+        isQuizInProgress = true
+        isQuizCompleted = false
+        isNavigatingToSettings = false
+
         extractTargetFromIntent(intent)
         setupLockscreenDisplay()
         checkOverlayPermission()
@@ -133,6 +159,7 @@ class MainActivity : ComponentActivity() {
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
+                @Suppress("DEPRECATION")
                 databaseEnabled = true
                 cacheMode = WebSettings.LOAD_DEFAULT
                 useWideViewPort = true
@@ -161,12 +188,20 @@ class MainActivity : ComponentActivity() {
 
         setContentView(webView)
 
+        // ナビゲーションバー（四角ボタン等）を隠す没入モード
+        hideSystemUI()
+
+        // 戻る操作ハンドラ（解錠完了まで脱出をブロック）
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (::webView.isInitialized && webView.canGoBack()) {
-                    webView.goBack()
+                if (isQuizCompleted) {
+                    if (::webView.isInitialized && webView.canGoBack()) {
+                        webView.goBack()
+                    } else {
+                        moveTaskToBack(true)
+                    }
                 } else {
-                    moveTaskToBack(true)
+                    Toast.makeText(this@MainActivity, "クイズに正解するまで戻れません 🔒", Toast.LENGTH_SHORT).show()
                 }
             }
         })
@@ -179,6 +214,11 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         extractTargetFromIntent(intent)
 
+        // 割り込み再開時にフラグをリセット
+        isQuizCompleted = false
+        isQuizInProgress = true
+        isNavigatingToSettings = false
+
         if (::webView.isInitialized) {
             webView.evaluateJavascript(
                 "try { window.dispatchEvent(new Event('intentgate:interrupt')); } catch(e) {}",
@@ -186,6 +226,107 @@ class MainActivity : ComponentActivity() {
             )
         }
     }
+
+    // ─────────────────────────────────────────────────────
+    // 離脱防止：ホームボタン・四角ボタン（タスク一覧）押下時
+    // ─────────────────────────────────────────────────────
+
+    /**
+     * ホームボタンや四角ボタンが押された時に呼ばれる。
+     * クイズ未完了かつ設定画面遷移中でなければ即座にアプリを最前面へ引き戻す。
+     */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (isQuizCompleted || isNavigatingToSettings) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastLeaveHintTime < LEAVE_HINT_DEBOUNCE_MS) return
+        lastLeaveHintTime = now
+
+        handler.postDelayed({
+            if (!isQuizCompleted && !isNavigatingToSettings && !isFinishing) {
+                bringToFront()
+            }
+        }, 150)
+    }
+
+    /**
+     * アプリが非表示になった時に呼ばれる。
+     * クイズ未完了かつ設定画面遷移中でなければアプリを最前面へ引き戻す。
+     */
+    override fun onStop() {
+        super.onStop()
+        if (isQuizCompleted || isNavigatingToSettings || isFinishing) return
+
+        handler.postDelayed({
+            if (!isQuizCompleted && !isNavigatingToSettings && !isFinishing) {
+                bringToFront()
+            }
+        }, 300)
+    }
+
+    /**
+     * ウィンドウフォーカスが戻った時に没入モードを再適用
+     */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && !isQuizCompleted) {
+            hideSystemUI()
+        }
+    }
+
+    /**
+     * アプリを最前面に引き戻すヘルパー
+     */
+    private fun bringToFront() {
+        try {
+            val relaunch = Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                )
+            }
+            startActivity(relaunch)
+        } catch (e: Exception) {
+            android.util.Log.w("IntentGate", "bringToFront failed", e)
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // 没入モード（ナビゲーションバー・ステータスバー非表示）
+    // ─────────────────────────────────────────────────────
+
+    private fun hideSystemUI() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                window.insetsController?.let { controller ->
+                    controller.hide(
+                        android.view.WindowInsets.Type.navigationBars() or
+                            android.view.WindowInsets.Type.statusBars()
+                    )
+                    controller.systemBarsBehavior =
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = (
+                    android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                    )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("IntentGate", "hideSystemUI failed", e)
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Intent / ロック画面 / オーバーレイ権限
+    // ─────────────────────────────────────────────────────
 
     private fun extractTargetFromIntent(intent: Intent?) {
         val pkg = intent?.getStringExtra(EXTRA_TARGET_PACKAGE)
@@ -227,10 +368,15 @@ class MainActivity : ComponentActivity() {
                     .setTitle("権限の許可が必要です")
                     .setMessage("制限したアプリを起動した際にIntentGateを自動で前面表示するため、「他のアプリの上に重ねて表示」を許可してください。")
                     .setPositiveButton("設定画面を開く") { _, _ ->
+                        // 設定画面への遷移中は離脱防止を一時解除
+                        isQuizCompleted = true
+                        isQuizInProgress = false
+                        isNavigatingToSettings = true
                         val intent = Intent(
                             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                             Uri.parse("package:$packageName")
                         )
+                        @Suppress("DEPRECATION")
                         startActivityForResult(intent, REQUEST_CODE_OVERLAY)
                     }
                     .setNegativeButton("あとで", null)
@@ -244,6 +390,10 @@ class MainActivity : ComponentActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_CODE_OVERLAY) {
+            // 設定画面から戻ってきたらクイズ未完了状態に戻す
+            isQuizCompleted = false
+            isQuizInProgress = true
+            isNavigatingToSettings = false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
                 Toast.makeText(this, "重ねて表示の権限が許可されました。", Toast.LENGTH_SHORT).show()
                 UnlockService.start(this)
@@ -252,6 +402,10 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    // ─────────────────────────────────────────────────────
+    // ユーティリティ
+    // ─────────────────────────────────────────────────────
 
     private fun drawableToBase64(drawable: Drawable): String {
         return try {
@@ -274,9 +428,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ─────────────────────────────────────────────────────
+    // AndroidBridge（Web ↔ Native 連携）
+    // ─────────────────────────────────────────────────────
+
     inner class AndroidBridge {
 
         private fun dismissApp() {
+            android.util.Log.i("IntentGate", "AndroidBridge: dismissApp called")
+            isQuizCompleted = true
+            isQuizInProgress = false
             moveTaskToBack(true)
             finishAndRemoveTask()
             @Suppress("DEPRECATION")
@@ -285,6 +446,8 @@ class MainActivity : ComponentActivity() {
 
         private fun launchOriginalApp(targetPkg: String) {
             android.util.Log.i("IntentGate", "Unlock complete. Returning to: $targetPkg")
+            isQuizCompleted = true
+            isQuizInProgress = false
             markAppUnlockedForSession(targetPkg)
             pendingTargetPackage = null
             pendingTargetAppName = null
@@ -318,12 +481,18 @@ class MainActivity : ComponentActivity() {
         fun openUsageStatsSettings() {
             runOnUiThread {
                 try {
+                    isNavigatingToSettings = true
+                    isQuizCompleted = true
+                    isQuizInProgress = false
                     startActivity(
                         Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                     )
                 } catch (e: Exception) {
+                    isNavigatingToSettings = false
+                    isQuizCompleted = false
+                    isQuizInProgress = true
                     Toast.makeText(this@MainActivity, "設定画面を開けませんでした", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -341,6 +510,9 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun openOverlaySettings() {
             runOnUiThread {
+                isNavigatingToSettings = true
+                isQuizCompleted = true
+                isQuizInProgress = false
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     startActivity(
                         Intent(
@@ -459,6 +631,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
         if (::webView.isInitialized) {
             webView.destroy()
         }
