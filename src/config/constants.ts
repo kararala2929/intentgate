@@ -4,25 +4,23 @@
  */
 
 import { TRANSLATIONS } from '../i18n/translations';
-import { AppSettings, ChallengeCategory, DifficultyLevel, Language, PurposeId, PurposeOption } from '../types';
+import { AppSettings, ChallengeCategory, Language, PurposeId, PurposeOption } from '../types';
 
 export const STORAGE_KEY_SETTINGS = 'intentgate_settings_v2';
 export const STORAGE_KEY_UNLOCK_LOGS = 'intentgate_unlock_logs_v1';
 export const STORAGE_KEY_LANGUAGE = 'intentgate_language_v1';
+export const STORAGE_KEY_RESTRICTED_PACKAGES = 'intentgate_restricted_packages_v1';
 
-/**
- * 全8ジャンルの名称定義（日本語デフォルト）
- */
-export const CATEGORY_LABELS: Record<ChallengeCategory, string> = {
-  math: '計算問題',
-  vocab: '英単語',
-  logic: '論理パズル',
-  memory: '瞬間記憶',
-  stroop: '色・文字判定',
-  kanji: '漢字・熟語',
-  trivia: '地理・歴史',
-  spatial: '時計・図形',
-};
+/** クイズクリア後、元のアプリへ自動復帰するまでの秒数 */
+export const AUTO_RETURN_SECONDS = 2;
+
+/** 初回デフォルトで制限対象にする代表パッケージ（ユーザーが一覧から自由にON/OFF可能） */
+export const DEFAULT_RESTRICTED_PACKAGES: string[] = [
+  'com.google.android.youtube',
+  'com.twitter.android',
+  'com.instagram.android',
+  'com.zhiliaoapp.musically',
+];
 
 export const ALL_CATEGORIES: ChallengeCategory[] = [
   'math',
@@ -43,15 +41,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   enabledCategories: ALL_CATEGORIES,
   difficulty: 'normal',
   requiredStreak: 1,
-};
-
-/**
- * 難易度ラベル定義（日本語デフォルト）
- */
-export const DIFFICULTY_LABELS: Record<DifficultyLevel, string> = {
-  easy: 'かんたん',
-  normal: '中級',
-  hard: '上級',
 };
 
 /**
@@ -87,8 +76,3 @@ export function getPurposeOptions(lang: Language): PurposeOption[] {
     barColor: PURPOSE_COLORS[id],
   }));
 }
-
-/**
- * 1タップで選べる6つの利用目的（互換用日本語リスト）
- */
-export const PURPOSE_OPTIONS: PurposeOption[] = getPurposeOptions('ja');

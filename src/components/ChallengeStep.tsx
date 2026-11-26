@@ -6,11 +6,17 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, CheckCircle2, Delete, Eye, XCircle } from 'lucide-react';
 import { TRANSLATIONS } from '../i18n/translations';
-import { ChallengeItem, DifficultyLevel, Language } from '../types';
+import {
+  ActiveTargetApp,
+  ChallengeItem,
+  DifficultyLevel,
+  Language,
+} from '../types';
 
 interface ChallengeStepProps {
   language: Language;
   purposeLabel: string;
+  targetApp: ActiveTargetApp | null;
   difficulty: DifficultyLevel;
   challenge: ChallengeItem;
   streak: number;
@@ -26,6 +32,7 @@ interface ChallengeStepProps {
 export const ChallengeStep: React.FC<ChallengeStepProps> = ({
   language,
   purposeLabel,
+  targetApp,
   difficulty,
   challenge,
   streak,
@@ -75,23 +82,28 @@ export const ChallengeStep: React.FC<ChallengeStepProps> = ({
     onSubmitNumpadAnswer(typedValue);
   };
 
+  const finalCorrectMessage = targetApp
+    ? tChallenge.correctReturningApp.replace('{app}', targetApp.appName)
+    : tChallenge.correctUnlocking;
+
   return (
     <div className="flex-1 flex flex-col justify-between px-5 py-5">
       <div>
         {/* 上部ステータス */}
-        <div className="flex items-center justify-between text-xs text-slate-500 mb-3">
+        <div className="flex items-center justify-between text-xs text-slate-500 mb-3 gap-2">
           <button
             type="button"
             onClick={onBackToPurpose}
-            className="flex items-center gap-1 text-slate-500 hover:text-slate-900 py-1 font-medium"
+            className="min-h-[36px] flex items-center gap-1 text-slate-500 hover:text-slate-900 py-1 font-medium truncate"
           >
-            <ArrowLeft className="w-4 h-4" />
-            <span>
+            <ArrowLeft className="w-4 h-4 shrink-0" />
+            <span className="truncate">
               {tChallenge.purposePrefix}
               {purposeLabel}
+              {targetApp ? ` · ${targetApp.appName}` : ''}
             </span>
           </button>
-          <span className="font-mono-tabular text-emerald-700 font-semibold">
+          <span className="font-mono-tabular text-emerald-700 font-semibold whitespace-nowrap shrink-0">
             {categoryLabel} · {difficultyLabel}（{streak}/{requiredStreak}）
           </span>
         </div>
@@ -271,7 +283,7 @@ export const ChallengeStep: React.FC<ChallengeStepProps> = ({
           </>
         )}
 
-        {/* 正誤フィードバック（正解時は自動で解除/次へ移行、不正解時は5秒後に自動で次へ移行） */}
+        {/* 正誤フィードバック */}
         {feedbackState !== 'idle' && (
           <div
             className={`p-4 rounded-2xl border text-xs leading-relaxed ${
@@ -284,7 +296,7 @@ export const ChallengeStep: React.FC<ChallengeStepProps> = ({
               <span className={feedbackState === 'correct' ? 'text-emerald-800' : 'text-rose-800'}>
                 {feedbackState === 'correct'
                   ? streak + 1 >= requiredStreak
-                    ? tChallenge.correctUnlocking
+                    ? finalCorrectMessage
                     : tChallenge.correctNext
                   : tChallenge.wrongPenalty}
               </span>

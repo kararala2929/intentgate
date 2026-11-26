@@ -5,7 +5,8 @@
 
 import React, { useMemo, useState } from 'react';
 import { BarChart3, Trash2, X } from 'lucide-react';
-import { PURPOSE_IDS, PURPOSE_COLORS } from '../config/constants';
+import { findCatalogApp } from '../config/appCatalog';
+import { PURPOSE_COLORS, PURPOSE_IDS } from '../config/constants';
 import { buildWeeklyDailyStats } from '../data/statsStorage';
 import { TRANSLATIONS } from '../i18n/translations';
 import { Language, UnlockLogItem } from '../types';
@@ -27,6 +28,27 @@ export const StatsModal: React.FC<StatsModalProps> = ({
 }) => {
   const weeklyDays = useMemo(() => buildWeeklyDailyStats(logs), [logs]);
   const [selectedDateKey, setSelectedDateKey] = useState<string | 'all_week'>('all_week');
+  const [confirmingClear, setConfirmingClear] = useState<boolean>(false);
+
+  const targetAppCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    logs.forEach((item) => {
+      if (item.targetApp) {
+        counts.set(item.targetApp, (counts.get(item.targetApp) || 0) + 1);
+      }
+    });
+    return Array.from(counts.entries())
+      .map(([appIdOrPkg, count]) => {
+        const appConfig = findCatalogApp(appIdOrPkg);
+        return {
+          id: appIdOrPkg,
+          label: appConfig ? appConfig.appName : appIdOrPkg,
+          color: appConfig?.brandColor || '#059669',
+          count,
+        };
+      })
+      .sort((a, b) => b.count - a.count);
+  }, [logs]);
 
   if (!isOpen) return null;
 
@@ -43,7 +65,6 @@ export const StatsModal: React.FC<StatsModalProps> = ({
       ? null
       : weeklyDays.find((d) => d.dateKey === selectedDateKey) || null;
 
-  // 目的別の集計（週間全体 または 選択した日付）
   const purposeCounts = PURPOSE_IDS.map((id) => {
     const count = selectedDayObj
       ? selectedDayObj.byPurpose[id] || 0
@@ -58,6 +79,7 @@ export const StatsModal: React.FC<StatsModalProps> = ({
 
   const maxPurposeCount = Math.max(...purposeCounts.map((p) => p.count), 1);
   const targetTotal = selectedDayObj ? selectedDayObj.totalCount : weekTotal;
+  const maxTargetAppCount = Math.max(...targetAppCounts.map((a) => a.count), 1);
 
   const getDayLabel = (dateKey: string): string => {
     const parts = dateKey.split('-').map(Number);
@@ -68,10 +90,14 @@ export const StatsModal: React.FC<StatsModalProps> = ({
     return '';
   };
 
-  const handleConfirmClear = () => {
-    if (window.confirm(t.clearConfirm)) {
-      onClearLogs();
+  const handleClearClick = () => {
+    if (!confirmingClear) {
+      setConfirmingClear(true);
+      window.setTimeout(() => setConfirmingClear(false), 3000);
+      return;
     }
+    setConfirmingClear(false);
+    onClearLogs();
   };
 
   return (
@@ -86,7 +112,8 @@ export const StatsModal: React.FC<StatsModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900"
+            aria-label={t.close}
+            className="min-w-[44px] min-h-[44px] rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900"
           >
             <X className="w-5 h-5" />
           </button>
@@ -134,7 +161,6 @@ export const StatsModal: React.FC<StatsModalProps> = ({
             )}
           </div>
 
-          {/* 棒グラフエリア */}
           <div className="h-44 pt-4 pb-1 grid grid-cols-7 gap-2 items-end border-b border-slate-200">
             {weeklyDays.map((day) => {
               const heightPercent =
@@ -152,7 +178,6 @@ export const StatsModal: React.FC<StatsModalProps> = ({
                   }
                   className="h-full flex flex-col items-center justify-end group focus:outline-none"
                 >
-                  {/* 回数ラベル */}
                   <span
                     className={`text-[11px] font-mono-tabular mb-1 ${
                       day.isToday || isSelected
@@ -163,7 +188,6 @@ export const StatsModal: React.FC<StatsModalProps> = ({
                     {day.totalCount}
                   </span>
 
-                  {/* 積み上げ棒本体 */}
                   <div
                     className={`w-full max-w-[28px] rounded-t-lg overflow-hidden flex flex-col-reverse transition-all ${
                       isSelected
@@ -198,7 +222,6 @@ export const StatsModal: React.FC<StatsModalProps> = ({
             })}
           </div>
 
-          {/* 曜日・日付ラベル */}
           <div className="grid grid-cols-7 gap-2 pt-2 text-center">
             {weeklyDays.map((day) => {
               const isSelected = selectedDateKey === day.dateKey;
@@ -287,15 +310,56 @@ export const StatsModal: React.FC<StatsModalProps> = ({
           </div>
         </div>
 
+        {/* 対象アプリ別の解除回数 */}
+        {targetAppCounts.length > 0 && (
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+            <span className="block text-xs font-bold text-slate-800">
+              {t.targetAppBreakdown}
+            </span>
+            <div className="space-y-2">
+              {targetAppCounts.map((item) => {
+                const widthPercent = Math.max(
+                  8,
+                  Math.round((item.count / maxTargetAppCount) * 100)
+                );
+                return (
+                  <div key={item.id} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-800">{item.label}</span>
+                      <span className="font-mono-tabular text-slate-600">
+                        {item.count}
+                        {t.unitTimes}
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-slate-200/80 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${widthPercent}%`,
+                          backgroundColor: item.color,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* フッターボタン */}
         <div className="flex items-center gap-2 pt-1">
           <button
             type="button"
-            onClick={handleConfirmClear}
-            className="min-h-[48px] px-4 rounded-2xl bg-slate-100 hover:bg-rose-50 border border-slate-200 text-xs text-slate-600 hover:text-rose-700 flex items-center justify-center gap-1.5 shrink-0"
+            onClick={handleClearClick}
+            className={`min-h-[48px] px-4 rounded-2xl border text-xs flex items-center justify-center gap-1.5 shrink-0 transition-colors ${
+              confirmingClear
+                ? 'bg-rose-600 border-rose-600 text-white font-bold'
+                : 'bg-slate-100 hover:bg-rose-50 border-slate-200 text-slate-600 hover:text-rose-700'
+            }`}
           >
             <Trash2 className="w-4 h-4" />
-            <span>{t.clearHistory}</span>
+            <span>{confirmingClear ? t.clearConfirmPrompt : t.clearHistory}</span>
           </button>
           <button
             type="button"

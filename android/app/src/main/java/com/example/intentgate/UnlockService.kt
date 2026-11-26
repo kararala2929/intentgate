@@ -1,28 +1,54 @@
 package com.example.intentgate
 
 import android.annotation.SuppressLint
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 
 /**
- * IntentGate - ロック解除・画面点灯監視フォアグラウンドサービス
+ * IntentGate - 制限対象アプリの起動を検知して自動割り込みするフォアグラウンドサービス
  */
 class UnlockService : Service() {
 
     private val unlockReceiver = UnlockReceiver()
     private var isReceiverRegistered = false
+    private val monitorHandler = Handler(Looper.getMainLooper())
+    private var lastInterceptTime = 0L
+    private var lastDetectedForegroundPkg: String? = null
+
+    private val monitorRunnable = object : Runnable {
+        override fun run() {
+            try {
+                checkForegroundAppLaunch()
+            } catch (e: Exception) {
+                Log.w(TAG, "Foreground monitor check error", e)
+            } finally {
+                monitorHandler.postDelayed(this, POLL_INTERVAL_MS)
+            }
+        }
+    }
 
     companion object {
+        private const val TAG = "IntentGateMonitor"
+        private const val POLL_INTERVAL_MS = 500L
+        private const val INTERCEPT_DEBOUNCE_MS = 1500L
+        private const val SESSION_LEAVE_GRACE_MS = 2500L
+
         const val CHANNEL_ID = "intentgate_monitor_channel"
         const val NOTIFICATION_ID = 1001
 
@@ -40,7 +66,8 @@ class UnlockService : Service() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildForegroundNotification())
-        registerUnlockReceiver()
+        registerScreenReceiver()
+        monitorHandler.post(monitorRunnable)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -49,38 +76,10 @@ class UnlockService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /**
-     * ユーザーがタスク一覧からアプリをスワイプで終了、または「全て閉じる」を押した場合のコールバック。
-     * クイズが進行中（未完了）の場合は、即座に MainActivity を再起動して脱出を防ぐ。
-     */
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        super.onTaskRemoved(rootIntent)
-        Log.d("IntentGateService", "onTaskRemoved called, isQuizInProgress=${MainActivity.isQuizInProgress}")
-
-        if (MainActivity.isQuizInProgress && MainActivity.isGateEnabled(this)) {
-            // 重ねて表示の権限チェック（Android 6.0+）
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                Log.w("IntentGateService", "Cannot relaunch: SYSTEM_ALERT_WINDOW not granted")
-                return
-            }
-
-            try {
-                val relaunchIntent = Intent(this, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP
-                }
-                startActivity(relaunchIntent)
-                Log.i("IntentGateService", "MainActivity relaunched after task removal")
-            } catch (e: Exception) {
-                Log.e("IntentGateService", "Failed to relaunch MainActivity", e)
-            }
-        }
-    }
-
-    private fun registerUnlockReceiver() {
+    private fun registerScreenReceiver() {
         if (!isReceiverRegistered) {
             val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_USER_PRESENT)
             }
             registerReceiver(unlockReceiver, filter)
@@ -88,14 +87,114 @@ class UnlockService : Service() {
         }
     }
 
+    private fun checkForegroundAppLaunch() {
+        if (!MainActivity.isGateEnabled(this)) return
+        if (!MainActivity.hasUsageStatsPermission(this)) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) return
+
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (powerManager?.isInteractive == false) return
+
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        if (keyguardManager?.isKeyguardLocked == true) return
+
+        val foregroundPkg = queryCurrentForegroundPackage() ?: return
+        val now = System.currentTimeMillis()
+
+        // 自アプリ表示中は処理しない
+        if (foregroundPkg == packageName) {
+            lastDetectedForegroundPkg = foregroundPkg
+            return
+        }
+
+        // クイズを解いて許可されたセッション中のアプリなら割り込まず継続利用を許可
+        val unlockedPkg = MainActivity.unlockedSessionPackage
+        if (unlockedPkg != null) {
+            if (foregroundPkg == unlockedPkg) {
+                MainActivity.lastSeenUnlockedAppAt = now
+                lastDetectedForegroundPkg = foregroundPkg
+                return
+            } else if (now - MainActivity.lastSeenUnlockedAppAt > SESSION_LEAVE_GRACE_MS) {
+                // 別アプリまたはホーム画面へ移ってから一定時間経過したらセッション許可を解除
+                MainActivity.clearUnlockedSession()
+            } else {
+                return
+            }
+        }
+
+        val restricted = MainActivity.getRestrictedPackages(this)
+        if (!restricted.contains(foregroundPkg)) {
+            lastDetectedForegroundPkg = foregroundPkg
+            return
+        }
+
+        // 同じアプリに対して短時間に連続割り込みしないようデバウンス
+        if (foregroundPkg == lastDetectedForegroundPkg && now - lastInterceptTime < INTERCEPT_DEBOUNCE_MS) {
+            return
+        }
+        if (now - lastInterceptTime < INTERCEPT_DEBOUNCE_MS) {
+            return
+        }
+
+        lastDetectedForegroundPkg = foregroundPkg
+        lastInterceptTime = now
+
+        val appLabel = try {
+            val appInfo = packageManager.getApplicationInfo(foregroundPkg, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
+        } catch (e: Exception) {
+            foregroundPkg
+        }
+
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            )
+            putExtra(MainActivity.EXTRA_TARGET_PACKAGE, foregroundPkg)
+            putExtra(MainActivity.EXTRA_TARGET_APP_NAME, appLabel)
+        }
+        startActivity(launchIntent)
+        Log.i(TAG, "Intercepted restricted app launch: $foregroundPkg ($appLabel)")
+    }
+
+    private fun queryCurrentForegroundPackage(): String? {
+        val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            ?: return null
+        val endTime = System.currentTimeMillis()
+        val startTime = endTime - 4000L
+        val events = usageStatsManager.queryEvents(startTime, endTime) ?: return null
+        val event = UsageEvents.Event()
+
+        var latestPkg: String? = null
+        var latestTime = 0L
+
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            val isForegroundEvent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                event.eventType == UsageEvents.Event.ACTIVITY_RESUMED
+            } else {
+                @Suppress("DEPRECATION")
+                event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
+            }
+            if (isForegroundEvent && event.timeStamp >= latestTime) {
+                latestTime = event.timeStamp
+                latestPkg = event.packageName
+            }
+        }
+        return latestPkg
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "IntentGate ロック監視",
+                "IntentGate アプリ制限監視",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "スマホのロック解除検知とクイズ起動を監視しています"
+                description = "制限対象アプリの起動を検知して認知課題ゲートを表示します"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -123,8 +222,8 @@ class UnlockService : Service() {
         }
 
         return builder
-            .setContentTitle("IntentGate 有効")
-            .setContentText("ロック解除時に認知課題ゲートを表示します")
+            .setContentTitle("IntentGate 監視中")
+            .setContentText("制限に設定したアプリを開く時に課題を表示します")
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -132,6 +231,7 @@ class UnlockService : Service() {
     }
 
     override fun onDestroy() {
+        monitorHandler.removeCallbacks(monitorRunnable)
         if (isReceiverRegistered) {
             try {
                 unregisterReceiver(unlockReceiver)

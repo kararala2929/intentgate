@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, Settings } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BarChart3, Settings, Shield } from 'lucide-react';
 import { ChallengeStep } from './components/ChallengeStep';
 import { PurposeStep } from './components/PurposeStep';
+import { RestrictedAppsModal } from './components/RestrictedAppsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { StatsModal } from './components/StatsModal';
 import { UnlockedStep } from './components/UnlockedStep';
@@ -24,7 +25,29 @@ import {
   toDateKey,
 } from './data/statsStorage';
 import { TRANSLATIONS } from './i18n/translations';
-import { AppSettings, ChallengeItem, GateStep, Language, PurposeId, UnlockLogItem } from './types';
+import {
+  ActiveTargetApp,
+  AndroidPermissionStatus,
+  AppSettings,
+  ChallengeItem,
+  GateStep,
+  InstalledAppInfo,
+  Language,
+  PurposeId,
+  UnlockLogItem,
+} from './types';
+import {
+  clearPendingTargetApp,
+  getAndroidPermissionStatus,
+  isRunningInNativeAndroid,
+  loadInstalledApps,
+  loadRestrictedPackages,
+  notifyUnlockComplete,
+  readNativeGateEnabled,
+  readPendingTargetApp,
+  saveRestrictedPackages,
+  syncNativeGateEnabled,
+} from './utils/androidBridge';
 
 export default function App() {
   const [language, setLanguage] = useState<Language>(() => {
@@ -55,11 +78,26 @@ export default function App() {
     }
   });
 
+  const [isNativeApp] = useState<boolean>(() => isRunningInNativeAndroid());
+  const [installedApps, setInstalledApps] = useState<InstalledAppInfo[]>(() =>
+    loadInstalledApps()
+  );
+  const [restrictedPackages, setRestrictedPackages] = useState<string[]>(() =>
+    loadRestrictedPackages()
+  );
+  const [permissionStatus, setPermissionStatus] = useState<AndroidPermissionStatus>(() =>
+    getAndroidPermissionStatus()
+  );
+  const [targetApp, setTargetApp] = useState<ActiveTargetApp | null>(() =>
+    readPendingTargetApp()
+  );
+
   const [unlockLogs, setUnlockLogs] = useState<UnlockLogItem[]>(() => loadUnlockLogs());
   const [step, setStep] = useState<GateStep>('purpose_check');
   const [selectedPurposeId, setSelectedPurposeId] = useState<PurposeId>('contact');
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isStatsOpen, setIsStatsOpen] = useState<boolean>(false);
+  const [isRestrictedAppsOpen, setIsRestrictedAppsOpen] = useState<boolean>(false);
 
   // Challenge state
   const [currentChallenge, setCurrentChallenge] = useState<ChallengeItem>(() =>
@@ -70,7 +108,8 @@ export default function App() {
   const [feedbackState, setFeedbackState] = useState<'idle' | 'correct' | 'wrong'>('idle');
   const [penaltySeconds, setPenaltySeconds] = useState<number>(0);
 
-  // Persist language
+  const hiddenAtRef = useRef<number | null>(null);
+
   const handleLanguageChange = (nextLang: Language) => {
     setLanguage(nextLang);
     try {
@@ -80,41 +119,58 @@ export default function App() {
     }
   };
 
-  // Persist settings & sync to native AndroidBridge
+  // 初回ロード時にAndroidネイティブ側の状態と権限・アプリ一覧・制限リストを同期
+  useEffect(() => {
+    const nativeEnabled = readNativeGateEnabled();
+    if (nativeEnabled !== null) {
+      setSettings((prev) => ({ ...prev, isGateEnabled: nativeEnabled }));
+    }
+    setInstalledApps(loadInstalledApps());
+    setPermissionStatus(getAndroidPermissionStatus());
+    saveRestrictedPackages(restrictedPackages);
+
+    const pending = readPendingTargetApp();
+    if (pending) {
+      setTargetApp(pending);
+      setStep('purpose_check');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Androidネイティブ側（MainActivity.onNewIntent）からの割り込み起動イベントを受信
+  useEffect(() => {
+    const handleNativeInterrupt = () => {
+      const pending = readPendingTargetApp();
+      if (pending) {
+        setTargetApp(pending);
+      }
+      setStep('purpose_check');
+      setStreak(0);
+      setSelectedOption(null);
+      setFeedbackState('idle');
+      setPenaltySeconds(0);
+      setCurrentChallenge(
+        pickNextChallenge(settings.enabledCategories, settings.difficulty)
+      );
+      setPermissionStatus(getAndroidPermissionStatus());
+    };
+
+    window.addEventListener('intentgate:interrupt', handleNativeInterrupt);
+    return () =>
+      window.removeEventListener('intentgate:interrupt', handleNativeInterrupt);
+  }, [settings.enabledCategories, settings.difficulty]);
+
+  // 設定の永続化＆ネイティブ同期
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
     } catch {
-      // ignore storage errors
-    }
-
-    // Android Native側のオン/オフ設定を同期
-    try {
-      const bridge = (window as any).AndroidBridge ?? (window as any).Android;
-      if (bridge?.setGateEnabled) {
-        bridge.setGateEnabled(settings.isGateEnabled);
-      }
-    } catch (e) {
-      console.warn('[IntentGate] sync setGateEnabled failed:', e);
-    }
-  }, [settings]);
-
-  // 初回ロード時にネイティブ側の状態を反映（ネイティブアプリ内で動いている場合）
-  useEffect(() => {
-    try {
-      const bridge = (window as any).AndroidBridge ?? (window as any).Android;
-      if (bridge?.isGateEnabled) {
-        const nativeEnabled = bridge.isGateEnabled();
-        if (typeof nativeEnabled === 'boolean') {
-          setSettings((prev) => ({ ...prev, isGateEnabled: nativeEnabled }));
-        }
-      }
-    } catch (e) {
       // ignore
     }
-  }, []);
+    syncNativeGateEnabled(settings.isGateEnabled);
+  }, [settings]);
 
-  // Regenerate problem when settings change
+  // 問題設定変更時に再生成
   useEffect(() => {
     setCurrentChallenge(pickNextChallenge(settings.enabledCategories, settings.difficulty));
     setStreak(0);
@@ -122,6 +178,43 @@ export default function App() {
     setFeedbackState('idle');
     setPenaltySeconds(0);
   }, [settings.enabledCategories, settings.difficulty]);
+
+  // 制限対象アプリのON/OFF切り替え
+  const handleToggleRestrictedPackage = useCallback((packageName: string) => {
+    setRestrictedPackages((prev) => {
+      const exists = prev.includes(packageName);
+      const next = exists
+        ? prev.filter((pkg) => pkg !== packageName)
+        : [...prev, packageName];
+      saveRestrictedPackages(next);
+      return next;
+    });
+  }, []);
+
+  // ブラウザプレビュー時：指定アプリの起動割り込みをシミュレート
+  const handleSimulateAppLaunch = useCallback(
+    (app: InstalledAppInfo) => {
+      setTargetApp({
+        packageName: app.packageName,
+        appName: app.appName,
+        iconBase64: app.iconBase64,
+      });
+      setStep('purpose_check');
+      setStreak(0);
+      setSelectedOption(null);
+      setFeedbackState('idle');
+      setPenaltySeconds(0);
+      setCurrentChallenge(
+        pickNextChallenge(settings.enabledCategories, settings.difficulty)
+      );
+    },
+    [settings.enabledCategories, settings.difficulty]
+  );
+
+  const handleClearTarget = useCallback(() => {
+    clearPendingTargetApp();
+    setTargetApp(null);
+  }, []);
 
   const advanceToNextWrongProblem = useCallback(() => {
     setSelectedOption(null);
@@ -132,26 +225,23 @@ export default function App() {
     );
   }, [settings.enabledCategories, settings.difficulty]);
 
-  // 正解した時は 0.7秒後に自動で解除画面（または次の問題）へ移る
+  // 正解した時は 0.7秒後に自動で解除（Android実機では即座に元アプリへ復帰＆画面終了）
   useEffect(() => {
     if (feedbackState !== 'correct') return;
     const timer = window.setTimeout(() => {
       const nextStreak = streak + 1;
       if (nextStreak >= settings.requiredStreak) {
-        const updated = recordUnlockLog(selectedPurposeId, settings.difficulty);
+        const updated = recordUnlockLog(
+          selectedPurposeId,
+          settings.difficulty,
+          targetApp?.appName || targetApp?.packageName
+        );
         setUnlockLogs(updated);
         setStep('unlocked');
 
-        // ── Androidアプリに「閉じて」と通知 ──
-        try {
-          const bridge = (window as any).AndroidBridge ?? (window as any).Android;
-          if (bridge?.unlockAndDismiss) {
-            bridge.unlockAndDismiss();
-          }
-        } catch (e) {
-          console.warn('[IntentGate] AndroidBridge call failed:', e);
+        if (isNativeApp) {
+          notifyUnlockComplete(targetApp?.packageName);
         }
-
         return;
       }
       setStreak(nextStreak);
@@ -170,9 +260,11 @@ export default function App() {
     settings.enabledCategories,
     settings.difficulty,
     selectedPurposeId,
+    targetApp,
+    isNativeApp,
   ]);
 
-  // 間違えた時の2秒間ペナルティカウントダウン → 0秒になったら自動的に次の問題へ切り替える
+  // 間違えた時の2秒間ペナルティカウントダウン → 0秒になったら自動的に次の問題へ
   useEffect(() => {
     if (feedbackState !== 'wrong') return;
     if (penaltySeconds <= 0) {
@@ -185,18 +277,35 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [feedbackState, penaltySeconds, advanceToNextWrongProblem]);
 
-  // スマホで画面を閉じて（スリープ・別アプリ切替して）再び開いた瞬間に自動で最初に戻す
+  // 別アプリや画面オフから復帰した際に権限状態・起動対象アプリ・画面状態を更新
   useEffect(() => {
     const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAtRef.current = Date.now();
+        return;
+      }
       if (document.visibilityState === 'visible') {
-        setStep('purpose_check');
-        setStreak(0);
-        setSelectedOption(null);
-        setFeedbackState('idle');
-        setPenaltySeconds(0);
-        setCurrentChallenge(
-          pickNextChallenge(settings.enabledCategories, settings.difficulty)
-        );
+        setPermissionStatus(getAndroidPermissionStatus());
+        const pending = readPendingTargetApp();
+        if (pending) {
+          setTargetApp(pending);
+        }
+
+        const hiddenDuration = hiddenAtRef.current
+          ? Date.now() - hiddenAtRef.current
+          : 0;
+        hiddenAtRef.current = null;
+
+        if (pending || hiddenDuration >= 1500) {
+          setStep('purpose_check');
+          setStreak(0);
+          setSelectedOption(null);
+          setFeedbackState('idle');
+          setPenaltySeconds(0);
+          setCurrentChallenge(
+            pickNextChallenge(settings.enabledCategories, settings.difficulty)
+          );
+        }
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -210,6 +319,11 @@ export default function App() {
   const todayKey = toDateKey(new Date());
   const todayCount = unlockLogs.filter((l) => l.dateKey === todayKey).length;
 
+  const restrictedAppsPreview = useMemo(() => {
+    const set = new Set(restrictedPackages);
+    return installedApps.filter((app) => set.has(app.packageName));
+  }, [installedApps, restrictedPackages]);
+
   const handleResetToStart = () => {
     setStep('purpose_check');
     setStreak(0);
@@ -219,7 +333,6 @@ export default function App() {
     setCurrentChallenge(pickNextChallenge(settings.enabledCategories, settings.difficulty));
   };
 
-  // 6つの目的ボタンを押した瞬間に次の問題画面へ進む
   const handleSelectPurposeAndProceed = (purposeId: string) => {
     setSelectedPurposeId(purposeId as PurposeId);
     setStreak(0);
@@ -257,13 +370,21 @@ export default function App() {
     setUnlockLogs(clearAllUnlockLogs());
   };
 
+  const handleReturnToOriginalApp = useCallback((packageName: string) => {
+    notifyUnlockComplete(packageName);
+  }, []);
+
   return (
     <div className="min-h-dvh bg-[#F8FAFC] text-slate-900 flex flex-col justify-between max-w-md mx-auto select-none border-x border-slate-200/70">
-      {/* スマホアプリ上部バー（言語切替ボタン、統計ボタン、設定ボタン） */}
+      {/* スマホアプリ上部バー */}
       <header className="px-4 pt-3.5 pb-2.5 bg-white border-b border-slate-200 flex items-center justify-between gap-2">
-        <span className="text-sm font-bold tracking-tight text-slate-900 shrink-0">
+        <button
+          type="button"
+          onClick={handleResetToStart}
+          className="text-sm font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
+        >
           IntentGate
-        </span>
+        </button>
 
         <div className="flex items-center gap-1.5 shrink-0">
           {/* 日 / 英 言語切り替えトグルボタン */}
@@ -298,11 +419,21 @@ export default function App() {
             </button>
           </div>
 
+          {/* 制限アプリ一覧ボタン */}
+          <button
+            type="button"
+            onClick={() => setIsRestrictedAppsOpen(true)}
+            className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
+          >
+            <Shield className="w-3.5 h-3.5 text-emerald-600" />
+            <span>{t.header.apps}</span>
+          </button>
+
           {/* 統計ボタン */}
           <button
             type="button"
             onClick={() => setIsStatsOpen(true)}
-            className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1 transition-colors"
+            className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
           >
             <BarChart3 className="w-3.5 h-3.5 text-emerald-600" />
             <span>{t.header.stats}</span>
@@ -312,9 +443,9 @@ export default function App() {
           <button
             type="button"
             onClick={() => setIsSettingsOpen(true)}
-            className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1 transition-colors"
+            aria-label={t.settingsModal.title}
+            className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
           >
-            <span>{t.difficulties[settings.difficulty]}</span>
             <Settings className="w-3.5 h-3.5 text-slate-500" />
           </button>
         </div>
@@ -324,15 +455,23 @@ export default function App() {
       {step === 'purpose_check' && (
         <PurposeStep
           language={language}
+          targetApp={targetApp}
+          restrictedAppsPreview={restrictedAppsPreview}
+          restrictedCount={restrictedPackages.length}
+          isNativeApp={isNativeApp}
           onSelectPurposeAndProceed={handleSelectPurposeAndProceed}
+          onSimulateAppLaunch={handleSimulateAppLaunch}
+          onClearTarget={handleClearTarget}
+          onOpenRestrictedApps={() => setIsRestrictedAppsOpen(true)}
         />
       )}
 
-      {/* Step 2: 全8ジャンルの問題画面（正解時は0.7秒後に自動で解除、不正解時は5秒後に自動で次へ） */}
+      {/* Step 2: 全8ジャンルの問題画面 */}
       {step === 'challenge_gate' && (
         <ChallengeStep
           language={language}
           purposeLabel={selectedPurposeLabel}
+          targetApp={targetApp}
           difficulty={settings.difficulty}
           challenge={currentChallenge}
           streak={streak}
@@ -346,16 +485,30 @@ export default function App() {
         />
       )}
 
-      {/* Step 3: 解錠完了画面 */}
+      {/* Step 3: 解錠完了＆対象アプリへの自動復帰画面 */}
       {step === 'unlocked' && (
         <UnlockedStep
           language={language}
           purposeLabel={selectedPurposeLabel}
+          targetApp={targetApp}
           todayCount={todayCount}
+          onReturnToApp={handleReturnToOriginalApp}
           onOpenStats={() => setIsStatsOpen(true)}
           onSimulateScreenOffAndWake={handleResetToStart}
         />
       )}
+
+      {/* 制限アプリ設定モーダル */}
+      <RestrictedAppsModal
+        isOpen={isRestrictedAppsOpen}
+        language={language}
+        installedApps={installedApps}
+        restrictedPackages={restrictedPackages}
+        permissionStatus={permissionStatus}
+        onTogglePackage={handleToggleRestrictedPackage}
+        onSimulateAppLaunch={handleSimulateAppLaunch}
+        onClose={() => setIsRestrictedAppsOpen(false)}
+      />
 
       {/* 1週間の起動統計グラフモーダル */}
       <StatsModal
@@ -371,7 +524,9 @@ export default function App() {
         isOpen={isSettingsOpen}
         language={language}
         settings={settings}
+        restrictedCount={restrictedPackages.length}
         onUpdateSettings={setSettings}
+        onOpenRestrictedApps={() => setIsRestrictedAppsOpen(true)}
         onClose={() => setIsSettingsOpen(false)}
       />
     </div>

@@ -22,7 +22,31 @@ export type PurposeId = 'study' | 'contact' | 'search' | 'sns' | 'kill_time' | '
 export type GateStep =
   | 'purpose_check'   // Step 1: 6択をタップしたら即座に問題へ
   | 'challenge_gate'  // Step 2: 8ジャンルの問題出題
-  | 'unlocked';       // Step 3: 解錠完了（ホームから開いた時も統計へアクセス可能）
+  | 'unlocked';       // Step 3: 解錠完了＆対象アプリへの自動復帰
+
+export interface InstalledAppInfo {
+  packageName: string;
+  appName: string;
+  /** Androidネイティブ側から渡されるアプリアイコン(Base64 Data URL) */
+  iconBase64?: string;
+  /** ブラウザプレビュー用のSVGアイコン識別子 */
+  iconKey?: string;
+  brandColor?: string;
+  bgTint?: string;
+  borderTint?: string;
+}
+
+export interface ActiveTargetApp {
+  packageName: string;
+  appName: string;
+  iconBase64?: string;
+}
+
+export interface AndroidPermissionStatus {
+  isNative: boolean;
+  hasOverlay: boolean;
+  hasUsageStats: boolean;
+}
 
 export interface PurposeOption {
   id: PurposeId;
@@ -54,7 +78,7 @@ export interface ChallengeItem {
 }
 
 export interface AppSettings {
-  isGateEnabled: boolean; // ロック解除時の自動起動オン/オフ
+  isGateEnabled: boolean; // アプリ制限監視のオン/オフ
   enabledCategories: ChallengeCategory[];
   difficulty: DifficultyLevel;
   requiredStreak: number; // 解錠に必要な正解数（1〜3問）
@@ -66,6 +90,7 @@ export interface UnlockLogItem {
   timestamp: string;    // HH:MM
   purposeId: PurposeId;
   difficulty: DifficultyLevel;
+  targetApp?: string;   // 対象アプリ名またはパッケージ名
 }
 
 export interface DailyStatDay {

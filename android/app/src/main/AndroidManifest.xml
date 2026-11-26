@@ -6,20 +6,32 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- 2. 他のアプリの上に重ねて表示する権限（Android 10+でロック解除時に自動割り込みするために必須） -->
+    <!-- 2. 他のアプリの上に重ねて表示する権限（バックグラウンドから自動割り込みするために必須） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
-    <!-- 3. ロック解除監視フォアグラウンドサービス権限 -->
+    <!-- 3. 起動されたアプリを検知するための使用状況アクセス権限 -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- 4. フォアグラウンド監視サービス権限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
-    <!-- 4. スマホ再起動時に自動で監視サービスを復旧させる権限 -->
+    <!-- 5. スマホ再起動時に自動で監視サービスを復旧させる権限 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- 5. 画面点灯・全画面インテント起動用権限・通知権限 -->
+    <!-- 6. 画面点灯・全画面インテント起動用権限 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Android 11+ (targetSdk 30+) で端末内の起動可能アプリ一覧を取得するためのクエリ宣言 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="true"
@@ -30,7 +42,7 @@
         android:theme="@style/Theme.IntentGate"
         android:usesCleartextTraffic="true">
 
-        <!-- メイン画面（ロック画面の上でも最前面で起動・単一インスタンス管理・タスク一覧に非表示） -->
+        <!-- メイン画面（単一インスタンス管理） -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -46,7 +58,7 @@
             </intent-filter>
         </activity>
 
-        <!-- ロック解除・画面点灯を常駐検知するフォアグラウンドサービス -->
+        <!-- 制限対象アプリの起動を常駐監視するフォアグラウンドサービス -->
         <service
             android:name=".UnlockService"
             android:exported="false"
@@ -54,7 +66,7 @@
             tools:ignore="ForegroundServicePermission">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="IntentGate Screen Lock Monitoring Service" />
+                android:value="IntentGate App Launch Monitoring Service" />
         </service>
 
         <!-- スマホ再起動時に監視サービスを自動再開するレシーバー -->
@@ -68,7 +80,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- 画面点灯・ロック解除イベント受取レシーバー（動的登録） -->
+        <!-- 画面消灯・ロック解除イベント受取レシーバー（動的登録） -->
         <receiver
             android:name=".UnlockReceiver"
             android:exported="false" />

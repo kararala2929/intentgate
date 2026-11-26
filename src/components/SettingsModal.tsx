@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Power, ShieldAlert, ShieldCheck, X } from 'lucide-react';
+import { ChevronRight, Shield, ShieldAlert, ShieldCheck, X } from 'lucide-react';
 import { ALL_CATEGORIES } from '../config/constants';
 import { TRANSLATIONS } from '../i18n/translations';
 import { AppSettings, ChallengeCategory, DifficultyLevel, Language } from '../types';
@@ -13,7 +13,9 @@ interface SettingsModalProps {
   isOpen: boolean;
   language: Language;
   settings: AppSettings;
+  restrictedCount: number;
   onUpdateSettings: (next: AppSettings) => void;
+  onOpenRestrictedApps: () => void;
   onClose: () => void;
 }
 
@@ -21,7 +23,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   language,
   settings,
+  restrictedCount,
   onUpdateSettings,
+  onOpenRestrictedApps,
   onClose,
 }) => {
   if (!isOpen) return null;
@@ -45,24 +49,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="w-full max-w-md bg-white border-t sm:border border-slate-200 rounded-t-3xl sm:rounded-3xl p-6 text-slate-900 shadow-xl space-y-6">
+      <div className="w-full max-w-md max-h-[92dvh] overflow-y-auto bg-white border-t sm:border border-slate-200 rounded-t-3xl sm:rounded-3xl p-6 text-slate-900 shadow-xl space-y-5">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-slate-900">{t.title}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900"
+            aria-label={t.close}
+            className="min-w-[44px] min-h-[44px] rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:text-slate-900"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* ロック解除時の自動起動 ON/OFF スイッチ */}
+        {/* アプリ制限監視 ON/OFF スイッチ */}
         <div className="p-4 rounded-2xl border transition-all duration-200 bg-slate-50/80 border-slate-200">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div
-                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors shrink-0 ${
                   settings.isGateEnabled
                     ? 'bg-emerald-100 text-emerald-700'
                     : 'bg-rose-100 text-rose-600'
@@ -84,7 +89,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
 
-            {/* トグルスイッチ本体 */}
             <button
               type="button"
               role="switch"
@@ -102,6 +106,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* 制限するアプリを選択画面への導線 */}
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            onOpenRestrictedApps();
+          }}
+          className="w-full p-4 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-between gap-3 text-left transition-colors"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0">
+              <Shield className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-slate-900 truncate">
+                {t.restrictedAppsLinkLabel}
+              </p>
+              <p className="text-xs text-slate-500 truncate mt-0.5">
+                {t.restrictedAppsLinkDesc.replace('{count}', String(restrictedCount))}
+              </p>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+        </button>
 
         {/* 難易度（3段階） */}
         <div>

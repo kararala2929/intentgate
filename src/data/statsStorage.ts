@@ -37,8 +37,9 @@ export function getLast7DaysDates(): Date[] {
 function createInitialSeedLogs(): UnlockLogItem[] {
   const dates = getLast7DaysDates();
   const seed: UnlockLogItem[] = [];
-  const sampleCounts = [14, 11, 15, 9, 12, 8, 2]; // 徐々にスマホ回数が減っているリアルな推移
+  const sampleCounts = [14, 11, 15, 9, 12, 8, 2];
   const purposes: PurposeId[] = ['contact', 'sns', 'search', 'study', 'kill_time', 'other'];
+  const sampleTargets = ['youtube', 'x', 'instagram', 'tiktok'];
 
   dates.forEach((d, dayIdx) => {
     const dKey = toDateKey(d);
@@ -47,12 +48,17 @@ function createInitialSeedLogs(): UnlockLogItem[] {
       const pId = purposes[(dayIdx + c * 2) % purposes.length];
       const hour = String(8 + ((c * 2) % 14)).padStart(2, '0');
       const min = String((c * 13) % 60).padStart(2, '0');
+      const targetApp =
+        pId === 'sns' || pId === 'kill_time'
+          ? sampleTargets[(dayIdx + c) % sampleTargets.length]
+          : undefined;
       seed.push({
         id: `seed-${dKey}-${c}`,
         dateKey: dKey,
         timestamp: `${hour}:${min}`,
         purposeId: pId,
         difficulty: 'normal',
+        targetApp,
       });
     }
   });
@@ -83,7 +89,8 @@ export function loadUnlockLogs(): UnlockLogItem[] {
  */
 export function recordUnlockLog(
   purposeId: PurposeId,
-  difficulty: DifficultyLevel
+  difficulty: DifficultyLevel,
+  targetApp?: string
 ): UnlockLogItem[] {
   const now = new Date();
   const dateKey = toDateKey(now);
@@ -96,6 +103,7 @@ export function recordUnlockLog(
     timestamp: `${hh}:${mm}`,
     purposeId,
     difficulty,
+    ...(targetApp ? { targetApp } : {}),
   };
 
   const current = loadUnlockLogs();

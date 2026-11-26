@@ -1,6 +1,0 @@
-{
-  "summary":  "AI Studioのコード変更をZIP形式でダウンロードし、Windows環境のVS Codeプロジェクトへ安全に上書きしてGitHubへ反映（Push）する手順の実施計画書です。",
-  "updatedAt":  "2026-11-12T05:31:52.438321511Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}
